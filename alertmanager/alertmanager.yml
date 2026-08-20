@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'src', 'dst']
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'policy-engine-webhook'
+
+receivers:
+- name: 'policy-engine-webhook'
+  webhook_configs:
+  - url: 'http://policy-engine:8002/alert'
+    send_resolved: true

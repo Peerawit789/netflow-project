@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  netflow-collector:
+    build:
+      context: ./netflow-collector
+    container_name: netflow-collector
+    restart: unless-stopped
+    volumes:
+      - /home/test123/Desktop/netflow-collector/flows:/data
+    ports:
+      - "2055:2055/udp"
+    networks:
+      - security-net
+
+#  netflow-simulator:
+#    build:
+#      context: ./netflow-simulator
+#    container_name: netflow-simulator
+#    restart: unless-stopped
+#    environment:
+#      - COLLECTOR_HOST=netflow-collector
+#      - COLLECTOR_PORT=2055
+#      - FLOWS_FILE=/data/test.txt
+#      - PYTHONUNBUFFERED=1
+#    volumes:
+#      - /home/test123/Desktop/netflow-collector/flows:/data
+#    depends_on:
+#      - netflow-collector
+#    networks:
+#      - security-net
+
+  matrix-builder:
+    build:
+      context: ./matrix-builder
+    container_name: matrix-builder
+    restart: unless-stopped
+    environment:
+      - DATA_DIR=/data
+      - CHECK_INTERVAL=10
+      - TOP_N=50
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /home/test123/Desktop/netflow-collector/flows:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - netflow-collector
+    networks:
+      - security-net
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - matrix-builder
+    networks:
+      - security-net
+
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    depends_on:
+      - prometheus
+    networks:
+      - security-net
+
+  ml-engine:
+    build:
+      context: ./ml-engine
+    container_name: ml-engine
+    restart: unless-stopped
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - CHECK_INTERVAL=15
+      - RETRAIN_INTERVAL=60
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8001:8001"
+    depends_on:
+      - prometheus
+    networks:
+      - security-net
+
+  policy-engine:
+    build:
+      context: ./policy-engine
+    container_name: policy-engine
+    restart: unless-stopped
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LLM_MIDDLEWARE_URL=http://llm-middleware:8003
+      - AUTO_RESPONSE_URL=http://auto-response:8004
+      - AUTO_RESPONSE_KEY=super-secret-key-12345
+      - AUDIT_LOG_PATH=/logs/audit.log
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/logs
+    ports:
+      - "8002:8002"
+    depends_on:
+      - alertmanager
+      - ml-engine
+    networks:
+      - security-net
+
+  llm-middleware:
+    build:
+      context: ./llm-middleware
+    container_name: llm-middleware
+    restart: unless-stopped
+    environment:
+      - DEEPSEEK_API_KEY=AQ.Ab8RN6LyI7sZNr8IND4YpNkTZDYjHg58bO3Si2cZhe7NAOVl3w
+      - DEEPSEEK_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+      - DEEPSEEK_MODEL=gemini-flash-latest
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8003:8003"
+    networks:
+      - security-net
+
+  auto-response:
+    build:
+      context: ./auto-response
+    container_name: auto-response
+    restart: unless-stopped
+    environment:
+      - SSH_KEY_PATH=/app/ssh/id_rsa
+      - FIREWALL_HOST=firewall
+      - FIREWALL_PORT=22
+      - AUTO_RESPONSE_KEY=super-secret-key-12345
+      - DB_PATH=/app/data/blocks.db
+      - AUDIT_LOG_PATH=/logs/audit.log
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/logs
+      - ./ssh_keys:/app/ssh
+      - auto-response-db:/app/data
+    ports:
+      - "8004:8004"
+    depends_on:
+      - firewall
+    networks:
+      - security-net
+
+  firewall:
+    build:
+      context: ./firewall
+    container_name: firewall
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./ssh_keys:/app/ssh:ro
+      - firewall-data:/data
+    networks:
+      - security-net
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - security-net
+
+networks:
+  security-net:
+    driver: bridge
+
+volumes:
+  auto-response-db:
+  firewall-data:

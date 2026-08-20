@@ -1,0 +1,11 @@
+groups:
+  - name: netflow_alerts
+    rules:
+      - alert: NetflowAnomalyDetected
+        expr: netflow_anomaly_score > 0.6
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "NetFlow Traffic Anomaly Detected"
+          description: "High anomaly score of {{ $value }} detected from source {{ $labels.src }} to destination {{ $labels.dst }} with pattern {{ $labels.pattern }}."
